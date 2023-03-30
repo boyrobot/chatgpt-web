@@ -57,11 +57,7 @@ const { isMobile } = useBasicLayout()
       >
         <SvgIcon class="text-2xl" icon="ri:arrow-down-s-line" />
       </button>
-      <HoverButton class="flex items-center justify-center w-11 h-11" :tooltip="$t('setting.setting')" @click="showSetting = true">
-        <span class="text-xl text-[#4f555e] dark:text-white">
-          <SvgIcon icon="ri:settings-4-line" />
-        </span>
-      </HoverButton>
+ 
       <Setting v-if="isMobile" v-model:visible="showSetting" />
     </div>
   </header>
