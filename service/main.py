@@ -10,6 +10,9 @@ from message_store import MessageStore
 from whisper_wapper import process_audio
 import argparse
 from api_model import ApiModel
+from weixin import WeixinLogin
+from weixin.pay import WeixinPay, WeixinPayError
+from weixin import WeixinMsg
 
 log_folder = os.path.join(abspath(dirname(__file__)), "log")
 logger.add(os.path.join(log_folder, "{time}.log"), level="INFO")
@@ -28,6 +31,18 @@ stream_response_headers = {
     "Content-Type": "application/octet-stream",
     "Cache-Control": "no-cache",
 }
+login = WeixinLogin('app_id', 'app_key')
+wx_pay = WeixinPay(app_id, mch_id, mch_key, notify_url)
+msg = WeixinMsg("e10adc3949ba59abbe56e057f20f883e", None, 0)
+
+app.add_url_rule("/msg", view_func=msg.view_func)
+
+app.config['SCHEDULER_API_ENABLED'] = True
+scheduler = APScheduler()
+scheduler.init_app(app)
+scheduler.start()
+
+scheduler.add_job(id='reset', func=reset, trigger='cron', hour=1, minute=0, second=0)
 
 
 @app.post("/config")
@@ -72,6 +87,105 @@ async def audio_chat_process(audio: UploadFile = File(...)):
     prompt = process_audio(audio, OPENAI_TIMEOUT, "whisper-1")
     return StreamingResponse(content=prompt, headers=stream_response_headers, media_type="text/event-stream")
 
+async def weixin_login():
+    url = login.authorize("http://code.show/login/weixin/callback", "snsapi_base")
+    data = login.access_token(code)
+    login.user_info(data.access_token)
+    login.refresh_token(data.refresh_token)
+
+@app.route("/login")
+def login():
+    openid = request.cookies.get("openid")
+    next = request.args.get("next") or request.referrer or "/",
+    if openid:
+        return redirect(next)
+
+    callback = url_for("authorized", next=next, _external=True)
+    url = wx_login.authorize(callback, "snsapi_base")
+    return redirect(url)
+
+@app.route("/authorized")
+def authorized():
+    code = request.args.get("code")
+    if not code:
+        return "ERR_INVALID_CODE", 400
+    next = request.args.get("next", "/")
+    data = wx_login.access_token(code)
+    openid = data.openid
+    resp = redirect(next)
+    expires = datetime.now() + timedelta(days=1)
+    resp.set_cookie("openid", openid, expires=expires)
+    return resp
+
+@app.route("/pay/create")
+def pay_create():
+    """
+    微信JSAPI创建统一订单，并且生成参数给JS调用
+    """
+    try:
+        out_trade_no = wx_pay.nonce_str
+        raw = wx_pay.jsapi(openid="openid", body=u"测试", out_trade_no=out_trade_no, total_fee=1)
+        return jsonify(raw)
+    except WeixinPayError as e:
+        print(e.message)
+        return e.message, 400
+
+
+@app.route("/pay/notify", methods=["POST"])
+def pay_notify():
+    """
+    微信异步通知
+    """
+    data = wx_pay.to_dict(request.data)
+    if not wx_pay.check(data):
+        return wx_pay.reply("签名验证失败", False)
+    # 处理业务逻辑
+    return wx_pay.reply("OK", True)
+
+@msg.all
+def all_test(**kwargs):
+    print kwargs
+    # 或者直接返回
+    # return "all"
+    return msg.reply(
+        kwargs['sender'], sender=kwargs['receiver'], content='all'
+    )
+
+
+@msg.text()
+def hello(**kwargs):
+    return dict(content="hello too!", type="text")
+
+
+@msg.text("world")
+def world(**kwargs):
+    return msg.reply(
+        kwargs['sender'], sender=kwargs['receiver'], content='hello world!'
+    )
+
+
+@msg.image
+def image(**kwargs):
+    print kwargs
+    return ""
+
+
+@msg.subscribe
+def subscribe(**kwargs):
+    print kwargs
+    return ""
+
+
+@msg.unsubscribe
+def unsubscribe(**kwargs):
+    print kwargs
+    return ""
+
+@app.route('/reset', methods=['GET'])
+def reset():
+    ''' 每天1点中重置使用次数 '''
+    
+    return 'success'
 
 def init_config():
     # 读取配置
