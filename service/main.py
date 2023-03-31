@@ -1,9 +1,11 @@
 from flask import Flask
+from flask import request, redirect, url_for
+
 import openai
 import os
 from os.path import abspath, dirname
 from loguru import logger
-from requests import Request
+from requests import Request, Response
 from chatgpt_wapper import process
 import uvicorn
 from message_store import MessageStore
@@ -32,7 +34,7 @@ stream_response_headers = {
     "Content-Type": "application/octet-stream",
     "Cache-Control": "no-cache",
 }
-login = WeixinLogin('app_id', 'app_key')
+wx_login = WeixinLogin('app_id', 'app_key')
 wx_pay = WeixinPay("app_id", "mch_id", "mch_key", "notify_url")
 msg = WeixinMsg("e10adc3949ba59abbe56e057f20f883e", None, 0)
 
@@ -42,16 +44,16 @@ app.add_url_rule("/msg", view_func=msg.view_func)
 
 @app.post("/config")
 async def config():
-    return JSONResponse(content=dict(
-        message=None,
-        status="Success",
-        data=dict(
-            apiModel=API_MODEL,
-            socksProxy=SOCKS_PROXY,
-            timeoutMs=OPENAI_TIMEOUT * 1000,
-        )
-    ))
-
+    '''获取配置'''
+    return {
+        "message": None,
+        "status": "Success",
+        "data":{
+            "apiModel":API_MODEL,
+            "socksProxy":SOCKS_PROXY,
+            "timeoutMs":OPENAI_TIMEOUT * 1000
+        }
+    }
 
 @app.post("/chat-process")
 async def chat_process(request_data: dict):
@@ -74,14 +76,13 @@ async def chat_process(request_data: dict):
 
     answer_text = process(prompt, options, memory_count, top_p, MASSAGE_STORE, OPENAI_TIMEOUT, MAX_TOKEN,
                           model=API_MODEL)
-    return StreamingResponse(content=answer_text, headers=stream_response_headers, media_type="text/event-stream")
-
+    # return streaming response
+    return Response(answer_text, headers=stream_response_headers, media_type="text/event-stream")
 
 @app.post("/audio-chat-process")
 async def audio_chat_process(audio: UploadFile = File(...)):
     prompt = process_audio(audio, OPENAI_TIMEOUT, "whisper-1")
-    return StreamingResponse(content=prompt, headers=stream_response_headers, media_type="text/event-stream")
-
+    return Response(prompt, headers=stream_response_headers, media_type="text/event-stream")
 
 @app.route("/login")
 def login():
@@ -93,36 +94,6 @@ def login():
     callback = url_for("authorized", next=next, _external=True)
     url = wx_login.authorize(callback, "snsapi_base")
     return redirect(url)
-
-
-@app.route("/authorized")
-def authorized():
-    code = request.args.get("code")
-    if not code:
-        return "ERR_INVALID_CODE", 400
-    next = request.args.get("next", "/")
-    data = wx_login.access_token(code)
-    openid = data.openid
-    resp = redirect(next)
-    expires = datetime.now() + timedelta(days=1)
-    resp.set_cookie("openid", openid, expires=expires)
-    return resp
-
-
-@app.route("/pay/create")
-def pay_create():
-    """
-    微信JSAPI创建统一订单，并且生成参数给JS调用
-    """
-    try:
-        out_trade_no = wx_pay.nonce_str
-        raw = wx_pay.jsapi(openid="openid", body=u"测试",
-                           out_trade_no=out_trade_no, total_fee=1)
-        return jsonify(raw)
-    except WeixinPayError as e:
-        print(e.message)
-        return e.message, 400
-
 
 @app.route("/pay/notify", methods=["POST"])
 def pay_notify():
