@@ -1,3 +1,4 @@
+from flask import Flask
 import openai
 import os
 from os.path import abspath, dirname
@@ -25,9 +26,7 @@ DEFAULT_MAX_TOKEN = 4096
 massage_store = MessageStore(
     db_path="message_store.json", table_name="chatgpt", max_size=DEFAULT_DB_SIZE)
 
-app = FastAPI()
-site = AdminSite(settings=Settings(
-    database_url_async='sqlite+aiosqlite:///amisadmin.db'))
+app = Flask(__name__)
 
 stream_response_headers = {
     "Content-Type": "application/octet-stream",
@@ -37,36 +36,9 @@ login = WeixinLogin('app_id', 'app_key')
 wx_pay = WeixinPay("app_id", "mch_id", "mch_key", "notify_url")
 msg = WeixinMsg("e10adc3949ba59abbe56e057f20f883e", None, 0)
 
-scheduler = SchedulerAdmin.bind(site)
 
-# app.add_url_rule("/msg", view_func=msg.view_func)
+app.add_url_rule("/msg", view_func=msg.view_func)
 # scheduler.add_job(id='reset', func=reset, trigger='cron', hour=1, minute=0, second=0)
-
-
-@app.on_event("startup")
-async def startup():
-    site.mount_app(app)
-    scheduler.start()
-
-@app.middleware("http")
-async def add_middleware_here(request: Request, call_next):
-    token = request.headers["Authorization"]
-    try:
-        verification_of_token = verify_token(token)
-        if verification_of_token:
-            response = await call_next(request)
-            return response
-        else:
-            return JSONResponse(status_code=403) # or 401
-    except InvalidSignatureError as er:
-        return JSONResponse(status_code=401)
-
-@app.middleware("http")
-async def errors_handling(request: Request, call_next):
-    try:
-        return await call_next(request)
-    except Exception as exc:
-        return JSONResponse(status_code=500, content={'reason': str(exc)})
 
 @app.post("/config")
 async def config():
