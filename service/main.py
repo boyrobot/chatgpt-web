@@ -2,6 +2,7 @@ import openai
 import os
 from os.path import abspath, dirname
 from loguru import logger
+from requests import Request
 from chatgpt_wapper import process
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -16,6 +17,7 @@ from weixin import WeixinMsg
 from fastapi_amis_admin.admin.settings import Settings
 from fastapi_amis_admin.admin.site import AdminSite
 from fastapi_scheduler import SchedulerAdmin
+from fastapi.responses import JSONResponse
 
 log_folder = os.path.join(abspath(dirname(__file__)), "log")
 logger.add(os.path.join(log_folder, "{time}.log"), level="INFO")
@@ -46,6 +48,31 @@ scheduler = SchedulerAdmin.bind(site)
 # app.add_url_rule("/msg", view_func=msg.view_func)
 # scheduler.add_job(id='reset', func=reset, trigger='cron', hour=1, minute=0, second=0)
 
+
+@app.on_event("startup")
+async def startup():
+    site.mount_app(app)
+    scheduler.start()
+
+@app.middleware("http")
+async def add_middleware_here(request: Request, call_next):
+    token = request.headers["Authorization"]
+    try:
+        verification_of_token = verify_token(token)
+        if verification_of_token:
+            response = await call_next(request)
+            return response
+        else:
+            return JSONResponse(status_code=403) # or 401
+    except InvalidSignatureError as er:
+        return JSONResponse(status_code=401)
+
+@app.middleware("http")
+async def errors_handling(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={'reason': str(exc)})
 
 @app.post("/config")
 async def config():
@@ -182,13 +209,11 @@ def unsubscribe(**kwargs):
     print(kwargs)
     return ""
 
-
-@app.route('/reset', methods=['GET'])
+@scheduler.scheduled_job('cron', hour=1, minute=30)
 def reset():
     ''' 每天1点中重置使用次数 '''
-
-    return 'success'
-
+    print('cron task is run...')
+    return "success"
 
 def init_config():
     # 读取配置
