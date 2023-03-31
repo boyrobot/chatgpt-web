@@ -2,30 +2,17 @@ import openai
 from backoff import on_exception, expo
 from io import BytesIO
 from typing import Optional
-from fastapi import UploadFile
 import concurrent.futures
 import asyncio
 import traceback
 from loguru import logger
 from errors import Errors
 
-
-def upload_file_to_file_obj(upload_file: UploadFile, file_obj: Optional[BytesIO] = None):
-    if file_obj is None:
-        file_obj = BytesIO()
-    file_obj.write(upload_file.file.read())
-    file_obj.seek(0)
-    file_obj.name = upload_file.filename
-    return file_obj
-
-
 async def process_audio(audio, timeout, model="whisper-1"):
     try:
-        file = upload_file_to_file_obj(audio)
-
         params = dict(
             model=model,
-            file=file,
+            file=audio,
             request_timeout=timeout,
         )
 
@@ -37,7 +24,6 @@ async def process_audio(audio, timeout, model="whisper-1"):
         prompt = transcript["text"]
         logger.debug("audio prompt: {}".format(prompt))
         del audio
-        del file
     except:
         err = traceback.format_exc()
         logger.error(err)

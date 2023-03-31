@@ -1,19 +1,18 @@
 from flask import Flask
 from flask import request, redirect, url_for
-
+from flask_apscheduler import APScheduler
 import openai
 import os
 from os.path import abspath, dirname
 from loguru import logger
-from requests import Request, Response
+from flask import Response
 from chatgpt_wapper import process
-import uvicorn
 from message_store import MessageStore
 from whisper_wapper import process_audio
 import argparse
 from api_model import ApiModel
 from weixin import WeixinLogin
-from weixin.pay import WeixinPay, WeixinPayError
+from weixin.pay import WeixinPay
 from weixin import WeixinMsg
 
 log_folder = os.path.join(abspath(dirname(__file__)), "log")
@@ -29,6 +28,7 @@ massage_store = MessageStore(
     db_path="message_store.json", table_name="chatgpt", max_size=DEFAULT_DB_SIZE)
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 stream_response_headers = {
     "Content-Type": "application/octet-stream",
@@ -40,7 +40,13 @@ msg = WeixinMsg("e10adc3949ba59abbe56e057f20f883e", None, 0)
 
 
 app.add_url_rule("/msg", view_func=msg.view_func)
-# scheduler.add_job(id='reset', func=reset, trigger='cron', hour=1, minute=0, second=0)
+
+app.config['SCHEDULER_API_ENABLED'] = True
+scheduler = APScheduler()
+scheduler.init_app(app)
+scheduler.start()
+
+# scheduler.add_job(id='reset', func=reset, trigger='cron',                  hour=1, minute=0, second=0)
 
 @app.post("/config")
 async def config():
@@ -57,6 +63,7 @@ async def config():
 
 @app.post("/chat-process")
 async def chat_process(request_data: dict):
+    # 登录验证
     prompt = request_data["prompt"]
     options = request_data["options"]
 
@@ -77,12 +84,23 @@ async def chat_process(request_data: dict):
     answer_text = process(prompt, options, memory_count, top_p, MASSAGE_STORE, OPENAI_TIMEOUT, MAX_TOKEN,
                           model=API_MODEL)
     # return streaming response
-    return Response(answer_text, headers=stream_response_headers, media_type="text/event-stream")
+    return Response(answer_text, headers=stream_response_headers, mimetype="text/event-stream")
 
-@app.post("/audio-chat-process")
-async def audio_chat_process(audio: UploadFile = File(...)):
-    prompt = process_audio(audio, OPENAI_TIMEOUT, "whisper-1")
-    return Response(prompt, headers=stream_response_headers, media_type="text/event-stream")
+ALLOWED_EXTENSIONS = set(['txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif'])
+UPLOAD_FOLDER = './upload'
+
+
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1] in ALLOWED_EXTENSIONS
+
+@app.route('/audio-chat-process', methods=['POST', 'GET'])
+async def audio_chat_process():
+    if request.method == 'POST':
+        file = request.files['file']
+        if file and allowed_file(file.filename):
+            prompt = process_audio(file, OPENAI_TIMEOUT, "whisper-1")
+    return Response(prompt, headers=stream_response_headers, mimetype="text/event-stream")
 
 @app.route("/login")
 def login():
@@ -106,7 +124,6 @@ def pay_notify():
     # 处理业务逻辑
     return wx_pay.reply("OK", True)
 
-
 @msg.all
 def all_test(**kwargs):
     print(kwargs)
@@ -128,7 +145,6 @@ def world(**kwargs):
         kwargs['sender'], sender=kwargs['receiver'], content='hello world!'
     )
 
-
 @msg.image
 def image(**kwargs):
     print(kwargs)
@@ -146,11 +162,11 @@ def unsubscribe(**kwargs):
     print(kwargs)
     return ""
 
-@scheduler.scheduled_job('cron', hour=1, minute=30)
+@app.route('/reset', methods=['GET'])
 def reset():
     ''' 每天1点中重置使用次数 '''
-    print('cron task is run...')
-    return "success"
+
+    return 'success'
 
 def init_config():
     # 读取配置
@@ -226,24 +242,6 @@ def init_config():
 
     openai_timeout = openai_timeout_ms / 1000
 
-    # service_timeout_ms = args.service_timeout_ms or 100000
-    # if isinstance(service_timeout_ms, str):
-    #     try:
-    #         service_timeout_ms = int(service_timeout_ms)
-    #     except:
-    #         service_timeout_ms = 100000
-
-    # if service_timeout_ms < 15000:
-    #     service_timeout_ms = 15000
-    #     logger.warning("Service timeout is too short, the system has automatically set it to 15000(ms).")
-
-    # service_timeout = service_timeout_ms / 1000
-
-    # if openai_timeout_ms > service_timeout_ms:
-    #     openai_timeout = service_timeout
-    #     logger.warning(
-    #         "OpenAI timeout is longer than service timeout, the system has automatically set it to the same as service timeout.")
-
     host = args.host or "0.0.0.0"
     port = args.port or 3002
     if isinstance(port, str):
@@ -268,4 +266,5 @@ if __name__ == "__main__":
     logger.info("OPENAI_TIMEOUT_MS:{}".format(OPENAI_TIMEOUT * 1000))
     # logger.info("SERVICE_TIMEOUT_MS:{}".format(SERVICE_TIMEOUT * 1000))
 
-    uvicorn.run(app, host=HOST, port=PORT)
+    # uvicorn.run(app, host=HOST, port=PORT)
+    app.run(host=HOST,port=PORT)
