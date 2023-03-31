@@ -331,4 +331,4 @@ if __name__ == "__main__":
     logger.info("OPENAI_TIMEOUT_MS:{}".format(OPENAI_TIMEOUT * 1000))
     # logger.info("SERVICE_TIMEOUT_MS:{}".format(SERVICE_TIMEOUT * 1000))
 
-    uvicorn.run(app, host=HOST, port=PORT)
+    uvicorn.run(app, host=HOST, port=PORT, workers=5)
