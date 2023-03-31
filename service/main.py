@@ -13,6 +13,9 @@ from api_model import ApiModel
 from weixin import WeixinLogin
 from weixin.pay import WeixinPay, WeixinPayError
 from weixin import WeixinMsg
+from fastapi_amis_admin.admin.settings import Settings
+from fastapi_amis_admin.admin.site import AdminSite
+from fastapi_scheduler import SchedulerAdmin
 
 log_folder = os.path.join(abspath(dirname(__file__)), "log")
 logger.add(os.path.join(log_folder, "{time}.log"), level="INFO")
@@ -23,26 +26,25 @@ DEFAULT_DB_SIZE = 100000
 DEFAULT_API_MODEL = "gpt-3.5-turbo"
 DEFAULT_MAX_TOKEN = 4096
 
-massage_store = MessageStore(db_path="message_store.json", table_name="chatgpt", max_size=DEFAULT_DB_SIZE)
+massage_store = MessageStore(
+    db_path="message_store.json", table_name="chatgpt", max_size=DEFAULT_DB_SIZE)
 
 app = FastAPI()
+site = AdminSite(settings=Settings(
+    database_url_async='sqlite+aiosqlite:///amisadmin.db'))
 
 stream_response_headers = {
     "Content-Type": "application/octet-stream",
     "Cache-Control": "no-cache",
 }
 login = WeixinLogin('app_id', 'app_key')
-wx_pay = WeixinPay(app_id, mch_id, mch_key, notify_url)
+wx_pay = WeixinPay("app_id", "mch_id", "mch_key", "notify_url")
 msg = WeixinMsg("e10adc3949ba59abbe56e057f20f883e", None, 0)
 
-app.add_url_rule("/msg", view_func=msg.view_func)
+scheduler = SchedulerAdmin.bind(site)
 
-app.config['SCHEDULER_API_ENABLED'] = True
-scheduler = APScheduler()
-scheduler.init_app(app)
-scheduler.start()
-
-scheduler.add_job(id='reset', func=reset, trigger='cron', hour=1, minute=0, second=0)
+# app.add_url_rule("/msg", view_func=msg.view_func)
+# scheduler.add_job(id='reset', func=reset, trigger='cron', hour=1, minute=0, second=0)
 
 
 @app.post("/config")
@@ -87,11 +89,6 @@ async def audio_chat_process(audio: UploadFile = File(...)):
     prompt = process_audio(audio, OPENAI_TIMEOUT, "whisper-1")
     return StreamingResponse(content=prompt, headers=stream_response_headers, media_type="text/event-stream")
 
-async def weixin_login():
-    url = login.authorize("http://code.show/login/weixin/callback", "snsapi_base")
-    data = login.access_token(code)
-    login.user_info(data.access_token)
-    login.refresh_token(data.refresh_token)
 
 @app.route("/login")
 def login():
@@ -103,6 +100,7 @@ def login():
     callback = url_for("authorized", next=next, _external=True)
     url = wx_login.authorize(callback, "snsapi_base")
     return redirect(url)
+
 
 @app.route("/authorized")
 def authorized():
@@ -117,6 +115,7 @@ def authorized():
     resp.set_cookie("openid", openid, expires=expires)
     return resp
 
+
 @app.route("/pay/create")
 def pay_create():
     """
@@ -124,7 +123,8 @@ def pay_create():
     """
     try:
         out_trade_no = wx_pay.nonce_str
-        raw = wx_pay.jsapi(openid="openid", body=u"测试", out_trade_no=out_trade_no, total_fee=1)
+        raw = wx_pay.jsapi(openid="openid", body=u"测试",
+                           out_trade_no=out_trade_no, total_fee=1)
         return jsonify(raw)
     except WeixinPayError as e:
         print(e.message)
@@ -142,9 +142,10 @@ def pay_notify():
     # 处理业务逻辑
     return wx_pay.reply("OK", True)
 
+
 @msg.all
 def all_test(**kwargs):
-    print kwargs
+    print(kwargs)
     # 或者直接返回
     # return "all"
     return msg.reply(
@@ -166,31 +167,34 @@ def world(**kwargs):
 
 @msg.image
 def image(**kwargs):
-    print kwargs
+    print(kwargs)
     return ""
 
 
 @msg.subscribe
 def subscribe(**kwargs):
-    print kwargs
+    print(kwargs)
     return ""
 
 
 @msg.unsubscribe
 def unsubscribe(**kwargs):
-    print kwargs
+    print(kwargs)
     return ""
+
 
 @app.route('/reset', methods=['GET'])
 def reset():
     ''' 每天1点中重置使用次数 '''
-    
+
     return 'success'
+
 
 def init_config():
     # 读取配置
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--openai_api_key', type=str, help='API key for OpenAI')
+    parser.add_argument('--openai_api_key', type=str,
+                        help='API key for OpenAI')
     parser.add_argument('--api_model', type=str, default="gpt-3.5-turbo",
                         help='OpenAI API model, default is gpt-3.5-turbo')
     parser.add_argument('--socks_proxy', type=str, default="",
@@ -201,8 +205,10 @@ def init_config():
                         help="Timeout for OpenAI API, default is '100000'")
     # parser.add_argument('--service_timeout_ms', type=str, default=DEFAULT_TIMEOUT_MS_STRING,
     #                     help="Timeout for backend service, default is '100000'")
-    parser.add_argument('--host', type=str, default="0.0.0.0", help='Host for server, default is 0.0.0.0')
-    parser.add_argument('--port', type=str, default="3002", help="Port for server, default is '3002'")
+    parser.add_argument('--host', type=str, default="0.0.0.0",
+                        help='Host for server, default is 0.0.0.0')
+    parser.add_argument('--port', type=str, default="3002",
+                        help="Port for server, default is '3002'")
     args = parser.parse_args()
 
     if not args.openai_api_key:
@@ -238,7 +244,8 @@ def init_config():
         logger.info("Socks proxy is disabled.")
 
     if DEFAULT_TIMEOUT_MS_STRING != args.timeout_ms:
-        logger.warning("The parameter '--timeout_ms' is deprecated, please use '--openai_timeout_ms' instead.")
+        logger.warning(
+            "The parameter '--timeout_ms' is deprecated, please use '--openai_timeout_ms' instead.")
         args.openai_timeout_ms = args.timeout_ms
 
     openai_timeout_ms = args.openai_timeout_ms or DEFAULT_TIMEOUT_MS_STRING
