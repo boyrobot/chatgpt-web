@@ -4,8 +4,6 @@ from os.path import abspath, dirname
 from loguru import logger
 from requests import Request
 from chatgpt_wapper import process
-from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
 from message_store import MessageStore
 from whisper_wapper import process_audio
@@ -14,10 +12,6 @@ from api_model import ApiModel
 from weixin import WeixinLogin
 from weixin.pay import WeixinPay, WeixinPayError
 from weixin import WeixinMsg
-from fastapi_amis_admin.admin.settings import Settings
-from fastapi_amis_admin.admin.site import AdminSite
-from fastapi_scheduler import SchedulerAdmin
-from fastapi.responses import JSONResponse
 
 log_folder = os.path.join(abspath(dirname(__file__)), "log")
 logger.add(os.path.join(log_folder, "{time}.log"), level="INFO")
