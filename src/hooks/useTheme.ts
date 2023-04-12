@@ -10,9 +10,9 @@ export function useTheme() {
 
   const isDark = computed(() => {
     if (appStore.theme === 'auto')
-      return OsTheme.value === 'dark'
+      return OsTheme.value === 'Light'
     else
-      return appStore.theme === 'dark'
+      return appStore.theme === 'Light'
   })
 
   const theme = computed(() => {
